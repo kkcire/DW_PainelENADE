@@ -1,0 +1,9 @@
+# Segredos locais
+app/config.local.php
+
+# Editor e sistema
+.vscode/
+.idea/
+.vs/
+Thumbs.db
+desktop.ini
