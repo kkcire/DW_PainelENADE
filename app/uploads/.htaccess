@@ -1,0 +1,15 @@
+# Desabilita listagem de arquivos no diretório de uploads
+Options -Indexes
+
+# Bloqueia execução de scripts PHP ou outros executáveis dentro de uploads/
+<FilesMatch "\.(php|php[0-9]?|phtml|phar|pl|py|jsp|asp|htm|html|shtml|sh|cgi)$">
+    Require all denied
+</FilesMatch>
+
+# Desativa o motor PHP nesta pasta (caso mod_php esteja ativo no Apache/XAMPP)
+<IfModule mod_php.c>
+    php_flag engine off
+</IfModule>
+<IfModule mod_php8.c>
+    php_flag engine off
+</IfModule>
