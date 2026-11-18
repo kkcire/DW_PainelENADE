@@ -1,119 +1,101 @@
-# Documentação de Arquitetura (`app/`)
+# Arquitetura do Projeto (Backend PHP API + Frontend React)
 
-Este documento detalha a arquitetura em camadas adotada no projeto **Painel ENADE · Recorte R05 (História e Pedagogia)**, desenvolvido em **PHP puro + PDO + PostgreSQL**.
+Este documento descreve a organização arquitetural do **Painel ENADE · Recorte R05 (História e Pedagogia)**, dividindo a responsabilidade entre o **Backend em PHP Puro (API JSON + PDO + PostgreSQL)** em `app/` e a **Interface em React (SPA)** em `frontend/`.
 
 ---
 
-## 1. Visão Geral das Camadas
+## 1. Árvore do Projeto
 
-O sistema foi projetado para evitar o acoplamento entre consultas SQL (`PDO`), regras de negócio (cálculos e upload de arquivos) e código de interface (`HTML`).
+```text
+DW_Grupo06_PainelENADE/
+├── README.md
+├── app/                                    # BACKEND: API REST/JSON em PHP Puro + PDO
+│   ├── config.php                          # Apenas retorna a instância do PDO (Singleton)
+│   ├── auth.php                            # Middleware de sessão, CORS e helpers de resposta JSON
+│   │
+│   ├── Models/                             # Isola todos os SELECT / INSERT / UPDATE / DELETE (PDO)
+│   │   ├── AcaoRepository.php              # CRUD na tabela `acao` e leitura em `vw_acao`
+│   │   └── IndicadorEnadeRepository.php    # Leitura das views `vw_oferta`, `vw_anos`, `vw_resultado`, `vw_cobertura`
+│   │
+│   ├── Services/                           # (SRP) Isola regras de negócio e upload
+│   │   ├── UploadEvidenciaService.php      # Valida PDF/PNG/JPG e máx. 2 MB e salva em uploads/
+│   │   └── PainelEstatisticasService.php   # Calcula cards, barras, série histórica e síntese
+│   │
+│   ├── login.php                           # Endpoint API (POST): chama auth.php e retorna JSON
+│   ├── logout.php                          # Endpoint API (POST): destrói sessão e retorna JSON
+│   ├── painel.php                          # Endpoint API (GET): chama PainelEstatisticasService e retorna JSON
+│   │
+│   ├── acoes/                              # Funcionam apenas como "Thin Controllers" (retornam JSON)
+│   │   ├── listar.php                      # GET: lista ações via AcaoRepository
+│   │   ├── criar.php                       # POST (FormData): UploadEvidenciaService -> AcaoRepository
+│   │   ├── editar.php                      # POST (FormData): atualiza ação e anexo
+│   │   ├── visualizar.php                  # GET (?id=): retorna detalhes de uma ação
+│   │   └── excluir.php                     # POST/DELETE: remove arquivo em uploads/ e apaga no banco
+│   │
+│   └── uploads/
+│       └── .htaccess                       # Bloqueia execução de scripts maliciosos no upload
+│
+├── frontend/                               # FRONTEND: Interface do Usuário em React
+│   ├── package.json
+│   └── src/
+│       ├── main.jsx                        # Ponto de entrada do React
+│       ├── App.jsx                         # Rotas do frontend (React Router)
+│       ├── services/
+│       │   └── api.js                      # Cliente HTTP (fetch/axios) que conversa com `app/`
+│       ├── components/
+│       │   ├── Header.jsx                  # Cabeçalho e navegação
+│       │   ├── Footer.jsx                  # Rodapé institucional
+│       │   └── AcaoForm.jsx                # Formulário reaproveitado em CriarAcaoPage e EditarAcaoPage
+│       ├── pages/
+│       │   ├── LoginPage.jsx               # Tela de Login
+│       │   ├── PainelPage.jsx              # Dashboard de Indicadores ENADE
+│       │   └── acoes/
+│       │       ├── ListaAcoesPage.jsx      # Listagem e filtros do CRUD
+│       │       ├── CriarAcaoPage.jsx       # Cadastro de nova ação
+│       │       ├── EditarAcaoPage.jsx      # Edição de ação existente
+│       │       └── VisualizarAcaoPage.jsx  # Visualização detalhada e anexo
+│       └── styles/
+│           └── global.css
+│
+├── banco/
+│   ├── estrutura.sql
+│   └── dados_iniciais.sql
+└── docs/
+    └── ARQUITETURA.md
+```
+
+---
+
+## 2. Fluxo de Comunicação (React ↔ PHP ↔ PostgreSQL)
 
 ```mermaid
-flowchart TD
-    Browser["Navegador do Usuário (GET / POST / FILES)"] --> Controller["Thin Controllers (painel.php, login.php, acoes/*.php)"]
-    Controller --> Auth["Middleware de Sessão (auth.php)"]
-    Controller --> Service["Camada de Serviços - SRP (Services/*.php)"]
-    Service --> Repo["Camada de Persistência - Repositories (Models/*.php)"]
+flowchart LR
+    React["Frontend React (frontend/src/)"] -- "HTTP (fetch / FormData)" --> Controller["Thin Controllers PHP (app/*.php, app/acoes/*.php)"]
+    Controller -- "JSON (json_encode)" --> React
+    Controller --> Auth["Middleware (app/auth.php)"]
+    Controller --> Service["Services - SRP (app/Services/)"]
+    Service --> Repo["Models / Repositories (app/Models/)"]
     Controller --> Repo
-    Repo --> Config["Singleton PDO (config.php)"]
-    Config --> DB[("PostgreSQL (Tabelas + Views vw_*)")]
-    Controller --> View["Camada de Apresentação (views/*.view.php + includes/*.php)"]
+    Repo --> PDO["Singleton PDO (app/config.php)"]
+    PDO --> PG[("PostgreSQL (dw_projeto_enade)")]
 ```
 
 ---
 
-## 2. Detalhamento por Camada
+## 3. Responsabilidade de Cada Camada
 
-### 2.1. Configuração e Conexão (`app/config.php`)
-- **Responsabilidade:** Abrir e fornecer a instância `PDO` conectada ao banco `dw_projeto_enade` no PostgreSQL.
-- **Padrão aplicado:** *Singleton* procedural por requisição utilizando `static $pdo = null;` dentro de `conectar(): PDO`.
-- **Configuração local:** Permite sobrescrever a senha padrão sem alterar arquivos versionados por meio de `app/config.local.php`.
+1. **Frontend (`frontend/src/`):**
+   - Cuida exclusivamente da interface visual, estados de tela e rotas do navegador.
+   - Faz requisições assíncronas (`fetch` / `axios` em `src/services/api.js`) para os endpoints `.php` da pasta `app/`.
+   - O componente `AcaoForm.jsx` substitui a antiga view PHP de formulário, sendo reaproveitado tanto em `CriarAcaoPage.jsx` quanto em `EditarAcaoPage.jsx`.
 
-### 2.2. Middleware de Autenticação e Helpers (`app/auth.php`)
-- **Responsabilidade:** Controlar o ciclo de vida da sessão (`$_SESSION`), proteger rotas restritas e oferecer funções utilitárias globais para as views e controllers.
-- **Principais funções:**
-  - `caminhoBaseApp(): string` — Calcula dinamicamente se o script atual está na raiz de `app/` (`.`) ou na subpasta `app/acoes/` (`..`), mantendo todos os links do menu e assets funcionais.
-  - `e(mixed $valor): string` — Escapa qualquer saída com `htmlspecialchars(..., ENT_QUOTES, 'UTF-8')` para prevenir ataques de **XSS**.
-  - `usuarioLogado(): ?array` — Retorna os dados do usuário autenticado na sessão ou `null`.
-  - `exigirLogin(): void` — Bloqueia o acesso de visitantes não autenticados e redireciona para `login.php`.
-  - `autenticarUsuario(PDO $pdo, string $login, string $senha): bool` — Consulta a tabela `usuario`, valida o hash `bcrypt` com `password_verify()` e regenera o ID da sessão (`session_regenerate_id(true)`).
-  - `encerrarSessao(): void` — Limpa `$_SESSION`, invalida o cookie de sessão e destrói a sessão no servidor.
-  - `definirMensagem(string $tipo, string $texto): void` e `obterMensagem(): ?array` — Implementam alertas temporários (*Flash Messages*) entre redirecionamentos HTTP (padrão *Post-Redirect-Get*).
+2. **Thin Controllers / Endpoints (`app/painel.php`, `app/login.php`, `app/acoes/*.php`):**
+   - Não possuem HTML.
+   - Apenas validam a sessão (`auth.php`), leem os parâmetros da requisição (`$_GET`, `$_POST`, `$_FILES`), acionam os `Services` e `Models`, e devolvem a resposta em **JSON** (`header('Content-Type: application/json')`).
 
----
+3. **Camada `Services/` (SRP — Responsabilidade Única):**
+   - `PainelEstatisticasService.php`: monta o array consolidado com cards, barras comparativas, série histórica e síntese para ser convertido em JSON pelo `painel.php`.
+   - `UploadEvidenciaService.php`: valida se o arquivo enviado no `FormData` do React é `PDF`, `PNG` ou `JPG`, se tem até `2 MB` e o salva com nome único em `app/uploads/`.
 
-### 2.3. Camada `Models/` (Pattern Repository)
-
-Isola 100% das instruções SQL (`SELECT`, `INSERT`, `UPDATE`, `DELETE`) usando `PDO` e *Prepared Statements*.
-
-#### `IndicadorEnadeRepository.php`
-Responsável exclusivamente pela leitura das **Views analíticas** do banco de dados:
-| Método | View Consultada | Retorno |
-|---|---|---|
-| `listarOfertas(): array` | `vw_oferta` | Lista de ofertas do recorte R05 (`id_oferta`, `curso`, `grau_academico`, `modalidade`, `rotulo`). |
-| `listarAnos(): array` | `vw_anos` | Lista de anos disponíveis ordenados de forma decrescente (`2025` até `2015`). |
-| `buscarCobertura(): ?array` | `vw_cobertura` | Totais consolidados do recorte (`ofertas`, `resultados`, `resultados_oficiais`, `resultados_simulados`, etc.). |
-| `buscarResultado(int $idOferta, int $ano): ?array` | `vw_resultado` | Indicadores completos de uma oferta em uma edição específica. |
-| `listarHistoricoPorOferta(int $idOferta): array` | `vw_resultado` | Série histórica completa (`2015–2025`) de uma oferta ordenada por ano crescente. |
-
-#### `AcaoRepository.php`
-Responsável pelo **CRUD completo** da entidade `acao` e leitura enriquecida pela `vw_acao`:
-| Método | Tabela / View | Descrição |
-|---|---|---|
-| `listar(?int $idOferta, ?string $situacao): array` | `vw_acao` | Lista ações com filtros dinâmicos opcionais por oferta e situação. |
-| `buscarPorId(int $idAcao): ?array` | `vw_acao` | Busca uma ação específica pelo ID, incluindo `oferta_rotulo` e `tem_anexo`. |
-| `criar(array $dados): int` | `acao` | Executa `INSERT ... RETURNING id_acao`, garantindo a constraint `ck_anexo_completo`. |
-| `atualizar(int $idAcao, array $dados): bool` | `acao` | Executa `UPDATE` nos dados e colunas de anexo da ação. |
-| `excluir(int $idAcao): bool` | `acao` | Executa `DELETE FROM acao WHERE id_acao = :id_acao`. |
-| `contarPorSituacao(?int $idOferta): array` | `acao` | Agrupa e soma ações por situação (`Planejada`, `Em andamento`, `Concluída` e `total`). |
-
----
-
-### 2.4. Camada `Services/` (Princípio da Responsabilidade Única — SRP)
-
-#### `UploadEvidenciaService.php`
-Isola toda a validação e manipulação de arquivos enviados pelo formulário de ações:
-1. Verifica se algum arquivo foi enviado (`UPLOAD_ERR_NO_FILE` é tratado como válido, pois o anexo é opcional).
-2. Valida o limite máximo de **2 MB** (`2 * 1024 * 1024` bytes).
-3. Valida a extensão do arquivo (`.pdf`, `.png`, `.jpg`, `.jpeg`).
-4. Inspeciona o **MIME type real** do conteúdo binário com `finfo_file()` (`application/pdf`, `image/png`, `image/jpeg`), evitando arquivos executáveis disfarçados.
-5. Gera um nome único de armazenamento (`evidencia_YYYYmmdd_HHMMSS_random.ext`) e move o arquivo para `app/uploads/`.
-6. Oferece `removerArquivo(?string $nomeArquivo)` para excluir anexos antigos do disco quando uma ação é editada ou excluída.
-
-#### `PainelEstatisticasService.php`
-Orquestra `IndicadorEnadeRepository` e `AcaoRepository` para entregar um pacote pronto (`$dadosPainel`) para `views/painel.view.php`:
-1. Resolve os filtros `id_oferta` e `ano` (aplicando valores padrão seguros caso não venham na URL).
-2. Formata os **4 Cards Principais** (Conceito Faixa + Contínuo + Variação, Taxa de Participação, Notas FG × CE e Cobertura do Recorte).
-3. Calcula os percentuais (`0%` a `100%`) das **Barras de Desempenho**.
-4. Prepara a **Série Histórica (2015–2025)** com altura proporcional para o gráfico de colunas em CSS e flags de destaque para dados `OFICIAL_INEP` vs. `SIMULADO_DIDATICO`.
-5. Monta a **Síntese Interpretativa** com leitura automática da diferença `diferenca_fg_ce` (`Formação Geral - Componente Específico`).
-
----
-
-### 2.5. Camada de Controladores ("Thin Controllers")
-
-Cada arquivo `.php` acessível pela URL funciona apenas como ponto de entrada HTTP:
-
-```mermaid
-sequenceDiagram
-    participant U as Usuário (Navegador)
-    participant C as acoes/criar.php (Thin Controller)
-    participant S as UploadEvidenciaService
-    participant R as AcaoRepository
-    participant V as views/acoes/form.view.php
-
-    U->>C: POST /acoes/criar.php ($_POST + $_FILES['anexo'])
-    C->>C: Valida campos obrigatórios (título, prazo, oferta...)
-    C->>S: processarUpload($_FILES['anexo'])
-    S-->>C: ['sucesso' => true, 'nome_original' => ..., 'nome_arquivo' => ...]
-    C->>R: criar($acaoForm)
-    R-->>C: retorna $novoId (INSERT RETURNING id_acao)
-    C->>U: Redirect 302 -> listar.php (com Flash Message de sucesso)
-```
-
----
-
-### 2.6. Camada de Apresentação (`app/views/` e `app/includes/`)
-- **Desacoplamento total de SQL:** Nenhuma view abre conexão nem executa queries.
-- **Reaproveitamento de formulário (`views/acoes/form.view.php`):** Tanto `acoes/criar.php` (`$modoEdicao = false`) quanto `acoes/editar.php` (`$modoEdicao = true`) carregam exatamente a mesma view.
-- **Proteção na pasta de uploads (`app/uploads/.htaccess`):** Desativa listagem de diretório (`Options -Indexes`) e bloqueia a execução de scripts (`.php`, `.phtml`, `.phar`, `.sh`, `.py`, `.cgi`), garantindo que arquivos enviados nunca possam ser executados pelo Apache.
+4. **Camada `Models/` (Pattern Repository):**
+   - `IndicadorEnadeRepository.php` e `AcaoRepository.php`: únicos arquivos do sistema que executam SQL (`SELECT`, `INSERT`, `UPDATE`, `DELETE`) via `PDO` usando a conexão única de `config.php`.

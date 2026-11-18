@@ -1,9 +1,14 @@
 <?php
 /**
- * logout.php - Encerra a sessão do usuário e redireciona para a tela de login.
+ * logout.php - Thin Controller (Endpoint de Logout)
  */
+
 require_once __DIR__ . '/auth.php';
 
+iniciarApi();
 encerrarSessao();
-header('Location: login.php');
-exit;
+
+responderJson([
+    'sucesso'  => true,
+    'mensagem' => 'Sessão encerrada com sucesso.',
+]);

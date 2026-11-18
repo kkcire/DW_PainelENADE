@@ -1,34 +1,52 @@
 <?php
 /**
- * login.php - Thin Controller de autenticação.
- * Verifica credenciais via auth.php e carrega a View de login.
+ * login.php - Thin Controller (Endpoint de Login)
+ *
+ * - GET:  Verifica se já existe sessão ativa.
+ * - POST: Valida login e senha enviados pelo React e inicia a sessão.
  */
+
 require_once __DIR__ . '/auth.php';
 
-if (usuarioLogado() !== null) {
-    header('Location: painel.php');
-    exit;
+iniciarApi();
+
+$metodo = $_SERVER['REQUEST_METHOD'] ?? 'GET';
+
+if ($metodo === 'GET') {
+    $usuario = usuarioLogado();
+    responderJson([
+        'sucesso'     => true,
+        'autenticado' => ($usuario !== null),
+        'usuario'     => $usuario,
+    ]);
 }
 
-$erroLogin     = null;
-$loginDigitado = '';
-
-if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-    $loginDigitado = trim((string) ($_POST['login'] ?? ''));
-    $senhaDigitada = (string) ($_POST['senha'] ?? '');
-
-    if ($loginDigitado === '' || $senhaDigitada === '') {
-        $erroLogin = 'Informe o usuário e a senha para entrar.';
-    } else {
-        $pdo = conectar();
-        if (autenticarUsuario($pdo, $loginDigitado, $senhaDigitada)) {
-            definirMensagem('sucesso', 'Bem-vindo(a) ao Painel ENADE (Recorte R05)!');
-            header('Location: painel.php');
-            exit;
-        }
-        $erroLogin = 'Usuário ou senha inválidos. (Demonstração: admin / admin123)';
-    }
+if ($metodo !== 'POST') {
+    responderJson(['sucesso' => false, 'erro' => 'Método não permitido.'], 405);
 }
 
-$tituloPagina = 'Acesso ao Sistema';
-require __DIR__ . '/views/login.view.php';
+$dados = lerDadosRequisicao();
+$login = trim((string) ($dados['login'] ?? ''));
+$senha = (string) ($dados['senha'] ?? '');
+
+if ($login === '' || $senha === '') {
+    responderJson([
+        'sucesso' => false,
+        'erro'    => 'Preencha o usuário e a senha.',
+    ], 400);
+}
+
+$pdo     = conectar();
+$usuario = autenticarUsuario($pdo, $login, $senha);
+
+if ($usuario === null) {
+    responderJson([
+        'sucesso' => false,
+        'erro'    => 'Usuário ou senha inválidos.',
+    ], 401);
+}
+
+responderJson([
+    'sucesso' => true,
+    'usuario' => $usuario,
+]);
