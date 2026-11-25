@@ -1,6 +1,11 @@
 # Segredos locais
 app/config.local.php
 
+# Frontend (Node / Vite)
+node_modules/
+frontend/node_modules/
+frontend/dist/
+
 # Editor e sistema
 .vscode/
 .idea/

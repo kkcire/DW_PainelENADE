@@ -9,7 +9,7 @@
  */
 
 export const API_BASE_URL =
-  import.meta.env.VITE_API_URL || 'http://localhost/DW_Grupo06_PainelENADE/app';
+  import.meta.env.VITE_API_URL || 'http://localhost:8000';
 
 /**
  * Função auxiliar padrão para requisições JSON com suporte a sessão PHP (cookies).
