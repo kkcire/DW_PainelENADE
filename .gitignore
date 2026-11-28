@@ -7,3 +7,7 @@ app/config.local.php
 .vs/
 Thumbs.db
 desktop.ini
+
+# Dependências e build do frontend
+frontend/node_modules/
+frontend/dist/
